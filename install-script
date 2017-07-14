@@ -24,6 +24,9 @@ function get_device
 
 function create_partition
 {
+
+	(echo o; echo w; echo y;) | gdisk $device	
+	
 	# boot
 	(echo n; echo 1; echo ; echo +512M; echo EF00; echo w; echo y;) | gdisk $device
 	# root
