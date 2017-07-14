@@ -17,8 +17,8 @@ logical_voloume=volume
 ### functions
 function get_device
 {
-	echo -n "enter the device (/dev/sdX): "
-	read device
+	#echo -n "enter the device (/dev/sdX): "
+	#read device
 	echo $device
 }
 
@@ -88,9 +88,16 @@ function mount_filesystem
 	mount $home_dm_path /mnt/home
 }
 
+function create_pacman_key
+{
+	pacman-key --init
+	pacman-key --populate archlinux
+}
+
 function bootstrap_base
 {
-	(echo y;) | pacstrap /mnt base base_devel \
+	# (echo y;) | pacstrap /mnt base base_devel \
+	(echo y;) | pacstrap /mnt base \
 	  	polkit \
 	  	ifplugd \
           	iw \
@@ -144,7 +151,7 @@ function set_host
 journal_config
 {
 	# usb or desktop?
-	nano /etc/systemd/journald.conf
+	# nano /etc/systemd/journald.conf
 	sed 's/#Storage/Storage=volatile/g' /etc/systemd/journald.conf
 	sed 's/#SystemMaxUser/SystemMaxUser=16M/g' /etc/systemd/journald.conf
 }
