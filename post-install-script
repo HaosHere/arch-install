@@ -1,0 +1,59 @@
+
+#!/bin/bash
+
+
+# login as alice
+# gui interface lxde lxdm
+#
+# make sure the network is connected
+#
+
+function xorg_install
+{
+	(echo y;) | sudo pacman -S xorg xorg-server xorg-apps xorg-xinit xterm xorg-twm xorg-xclock 
+}
+
+function display_driver_install
+{
+	(echo y;) | sudo pacman -S xf86-video-vesa xf86-video-ati xf86-video-intel xf86-video-nouveau xf86-video-fbdev
+}
+
+function lxde_lxdm_install
+{
+	(echo y;) | sudo pacman -S gamin lxde lxdm
+}
+
+function lxdm_enable
+{
+	systemctl enable lxdm.service
+}
+
+function networkManager_enable
+{
+	(echo y;) | sudo pacman -S networkmanager network-manager-applet
+
+	systemctl enable NetworkManager.service
+	systemctl start NetworkManager.service
+}
+
+function pacman_key_generate
+{
+	pacman-key --init
+	pacman-key --populate archlinux 
+}
+
+### main flow
+
+xorg_install
+
+display_driver_install
+
+lxde_lxdm_install
+
+lxdm_enable
+
+networkManager_enable
+
+pacman_key_generate
+
+

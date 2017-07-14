@@ -1,0 +1,225 @@
+
+#!/bin/bash
+
+### constants
+user=alice
+hostname=archUSB
+device=
+disk_dm_name=encryptpart
+swap_dm_name=swap
+home_dm_name=home
+disk_dm_path=/dev/mapper/$disk_dm_name
+swap_dm_path=/dev/mapper/${logical_voloume}-${swap_dm_name}
+home_dm_path=/dev/mapper/${logical_voloume}-${home_dm_name}
+
+logical_voloume=volume
+
+### functions
+function get_device
+{
+	echo -n "enter the device (/dev/sdX): "
+	read device
+	echo $device
+}
+
+function create_partition
+{
+	# boot
+	(echo n; echo 1; echo ; echo +512M; echo EF00; echo w; echo y;) | gdisk $device
+	# root
+	(echo n; echo 2; echo ; echo +5G; echo ; echo w; echo y;) | gdisk $device
+	# lvm
+	(echo n; echo 3; echo ; echo ; echo 8E00; echo w; echo y;) | gdisk $device
+}
+
+function set_partition_name
+{	
+	a=1
+	b=2
+	c=3
+	d=4
+	boot=$device$a
+	root=$device$b
+	encryptpart=$device$c
+}
+
+function encrypt
+{
+	(echo YES; echo 1; echo 1;) | cryptsetup luksFormat $encryptpart
+	if [ "$?" = "0" ]; then
+		(echo 1;) | cryptsetup open --type luks $home $disk_dm_path
+	else
+		echo "disk encryption failed"
+		exit 1
+	fi   
+}
+
+function logical_volome_config
+{
+	logical_voloume=volume
+
+	pvcreate $disk_dm_path
+	vgcreate $logical_voloume $disk_dm_name
+	lvcreate -L1G $logical_voloume -n $swap_dm_name
+	lvcreate -l 100%FREE $logical_voloume -n $home_dm_name
+}
+
+function format
+{	
+	mkfs.fat -F32 $boot
+	
+	mkfs.ext4 $root
+
+	mkfs.ext4 $home_dm_path
+
+	mkswap $swap_dm_path
+	swapon $swap_dm_path
+}
+
+function mount_filesystem
+{
+	mount $root /mnt
+
+	mkdir /mnt/home
+        mkdir /mnt/boot
+
+	mount $boot /mnt/boot
+	
+	mount $home_dm_path /mnt/home
+}
+
+function bootstrap_base
+{
+	(echo y;) | pacstrap /mnt base base_devel \
+	  	polkit \
+	  	ifplugd \
+          	iw \
+	  	wpa_supplicant \
+	  	dialog
+}
+
+function generate_fstab
+{
+	genfstab -U /mnt >> /mnt/etc/fstab
+}
+
+function change_root
+{
+	arch-chroot /mnt
+}
+
+function passwd_newuser
+{
+	(echo 1; echo 1;) |passwd
+
+	useradd -m -G wheel -s /bin/bash $user
+	
+	(echo 1; echo 1;) | passwd alice
+	echo "$user ALL=(ALL) ALL" >> visudo	
+}
+
+function timezone_locale
+{
+	ln -sf /usr/share/zoneinfo/Australia/Melbourne /etc/localtime
+	hwclock --systohc
+
+	nano /etc/locale.gen
+	## uncomment
+	sed 's/#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/g' /etc/locale.gen
+	sed 's/#en_US ISO-8859-1/en_US ISO-8859-1/g' /etc/locale.gen
+	
+	locale-gen
+	locale > /etc/locale.conf
+	echo LANG=en_US.UTF-8 > /etc/locale.conf
+}
+
+function set_host
+{
+	echo $hostname > /etc/hostname
+	
+	#check the line !!!!!
+	sed -i '8i\127.0.1.1       ${host}.localdomain     $host' /etc/hosts
+}
+
+journal_config
+{
+	# usb or desktop?
+	nano /etc/systemd/journald.conf
+	sed 's/#Storage/Storage=volatile/g' /etc/systemd/journald.conf
+	sed 's/#SystemMaxUser/SystemMaxUser=16M/g' /etc/systemd/journald.conf
+}
+
+# if only home partition is encrypted without lvm
+# config cryptab_config
+function crypttab_config
+{
+	encrypt_uuid=$(blkid -o value -s UUID $encryptpart)
+	echo "  $disk_dm_name  UUID=$encrypt_uuid    none                   luks,timeout=10" >> /etc/crypttab
+}
+
+function mkinitcpio_config
+{
+	# check the original HOOK value
+	sed 's/HOOK="base udev autodetect modconf block filesystems keyboard fsck"/HOOK="base udev block autodetect modconf keyboard encrypt filesystems fsck"/g' /etc/mkinitcpio.conf
+	mkinitcpio -p linux
+}
+
+function bootloader_init
+{
+	root_uuid=$(blkid -o value -s UUID $root)
+	bootctl --path=/boot install
+	#Create a loader
+	echo "default arch" > /boot/loader/loader.conf
+	echo "timeout 3" >> /boot/loader/loader.conf
+	echo "editor 0" >> /boot/loader/loader.conf
+
+	#create entry
+	echo "title Arch Linux" > /boot/loader/entries/arch.conf
+	echo "linux /vmlinuz-linux" >> /boot/loader/entries/arch.conf
+	echo "initrd /initramfs-linux.img" >> /boot/loader/entries/arch.conf
+	echo "options cryptdevice=UUID=$encrypt_uuid:$logical_voloume root=UUID=$root_uuid quiet rw" >> /boot/loader/entries/arch.conf
+}
+
+function umount_exit
+{
+	exit
+        umount /mnt/boot
+        umount /mnt/home
+        umount /mnt
+	reboot
+}
+
+
+### main flow
+
+get_device
+
+create_partition
+set_partition_name
+
+encrypt
+
+logical_volome_config
+format
+mount_filesystem
+
+create_pacman_key
+bootstrap_base
+generate_fstab
+change_root
+passwd_newuser
+
+timezone_locale
+
+set_host
+
+journal_config
+
+#crypttab_config
+
+mkinitcpio_config
+
+bootloader_init
+
+umount_exit
+
